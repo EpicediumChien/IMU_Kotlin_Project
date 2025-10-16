@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        You MUST replace vendor-id and product-id with the actual values for your IMU.
+        Find these using Device Manager on Windows, System Information on macOS,
+        or by checking Logcat in Android Studio when you plug in the device.
+    -->
+    <usb-device vendor-id="1234" product-id="5678" />
+    <!-- Replace with your device's Vendor and Product ID -->
+    <usb-device vendor-id="6790" product-id="29987" />
+</resources>
