@@ -116,7 +116,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         dataTextView = findViewById(R.id.dataTextView)
         dataTextView.movementMethod = ScrollingMovementMethod()
 
-        usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        usbManager = getSystemService(USB_SERVICE) as UsbManager
 
         val filter = IntentFilter()
         filter.addAction(ACTION_USB_PERMISSION)
@@ -296,7 +296,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             Log.w(TAG, "Permission not granted, requesting...")
             updateStatus("Requesting USB permission...")
             isPermissionRequestPending = true
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            val flags = PendingIntent.FLAG_IMMUTABLE
             val permissionIntent = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), flags)
             usbManager.requestPermission(device, permissionIntent)
         }
@@ -312,7 +312,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         if (connection == null) {
             updateStatus("Error: Could not open connection.")
             if (!usbManager.hasPermission(device)) {
-                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+                val flags = PendingIntent.FLAG_IMMUTABLE
                 val permissionIntent = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), flags)
                 usbManager.requestPermission(device, permissionIntent)
             }
@@ -350,7 +350,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
     private fun updateStatus(message: String) {
         runOnUiThread {
-            statusTextView.text = "Status: $message"
+            statusTextView.text = getString(R.string.statusText, message)
         }
     }
 
