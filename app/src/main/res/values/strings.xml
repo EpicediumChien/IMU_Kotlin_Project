@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">MyFristKotlinApp</string>
+    <string name="statusText">Status: %1$s</string>
 </resources>
