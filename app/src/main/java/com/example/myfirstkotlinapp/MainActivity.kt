@@ -73,7 +73,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
     private lateinit var connectionCheckRunnable: Runnable
 
     private val usbReceiver = object : BroadcastReceiver() {
-        // ... This whole section is unchanged ...
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -129,6 +128,10 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
     // --- MODIFIED: onNewData now uses the robust packet parser ---
     override fun onNewData(data: ByteArray) {
+        // --- ADD THIS LOG LINE ---
+        Log.d(TAG, "Read ${data.size} bytes: ${data.joinToString { "%02x".format(it) }}")
+        // -------------------------
+
         // Add incoming data to our buffer
         receiveBuffer.write(data)
         // Process the buffer to find and parse complete packets
@@ -321,6 +324,12 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         try {
             serialPort?.open(connection)
             serialPort?.setParameters(BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+
+            // --- ADD THESE TWO LINES HERE ---
+            serialPort?.dtr = true
+            serialPort?.rts = true
+            // --------------------------------
+
             serialIoManager = SerialInputOutputManager(serialPort, this)
             Executors.newSingleThreadExecutor().submit(serialIoManager)
             updateStatus("Connected!")

@@ -51,6 +51,13 @@ dependencies {
     implementation(libs.usb.serial)
     implementation(libs.appcompat)
     implementation("com.google.android.material:material:1.12.0")
+    // AWS SDK for Kotlin - S3 client
+    implementation("aws.sdk.kotlin:s3:1.5.74") // Use the latest stable version
+
+    implementation("aws.sdk.kotlin:cognitoidentity:1.5.74")
+    // Import the AWS SDK for Kotlin BOM
+    // Use the latest stable version from https://github.com/awslabs/aws-sdk-kotlin/releases
+    implementation("aws.smithy.kotlin:aws-credentials:1.5.18") // <-- Updated group and example version
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
