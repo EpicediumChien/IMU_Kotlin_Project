@@ -26,6 +26,9 @@ import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -39,6 +42,8 @@ import java.util.Collections
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import com.example.myfirstkotlinapp.viewmodel.ImuRecord
+import androidx.lifecycle.ViewModelProvider // Add this
 
 // --- Data classes ---
 data class ImuData(val accX: Float, val accY: Float, val accZ: Float,
@@ -47,49 +52,33 @@ data class ImuData(val accX: Float, val accY: Float, val accZ: Float,
 
 data class RpyData(val roll: Float, val pitch: Float, val yaw: Float)
 
-// --- NEW: Data class for CSV Storage ---
-data class ImuRecord(
-    val timestamp: Long,
-    val accX: Float, val accY: Float, val accZ: Float,
-    val gyroX: Float, val gyroY: Float, val gyroZ: Float,
-    val magX: Float, val magY: Float, val magZ: Float,
-    val roll: Float, val pitch: Float, val yaw: Float
-) {
-    fun toCsvString(): String {
-        return "$timestamp,$accX,$accY,$accZ,$gyroX,$gyroY,$gyroZ,$magX,$magY,$magZ,$roll,$pitch,$yaw"
-    }
-}
-
-// --- Enum to select the IMU protocol ---
 enum class ImuType {
-    HF,         // The original protocol (0xAA 0x55)
-    YAHBOOM     // The Python Script protocol (0x55 0x51/52/53)
+    HF,
+    YAHBOOM
 }
 
 class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
-    // --- Variable to hold current selection (changed by Spinner) ---
     private var currentImuType = ImuType.HF
 
-    // --- NEW: Buffer to store data for CSV saving ---
-    // Synchronized list is used because data comes from Serial thread, but saved on IO thread
+    // Buffer to store data
     private val imuDataBuffer = Collections.synchronizedList(ArrayList<ImuRecord>())
+
+    // --- NEW: Coroutine Job to handle the timer ---
+    private var csvJob: Job? = null
 
     companion object {
         private const val VENDOR_ID = 4292
         private const val PRODUCT_ID = 60000
-
-        // BAUD_RATE = 115200 ~= 349Hz
-        // BAUD_RATE = 9600 ~= 29Hz
-        private const val BAUD_RATE = 9600 // Kept at 9600
+        private const val BAUD_RATE = 9600
         private const val TAG = "IMU_USB"
         private const val ACTION_USB_PERMISSION = "com.example.myfirstkotlinapp.USB_PERMISSION"
         private const val POLLING_INTERVAL_MS = 10000L
 
-        // --- CSV CONFIG ---
-        private const val CSV_SAVE_INTERVAL_MS = 5 * 60 * 1000L // 5 Minutes
+        // --- CSV CONFIG: 1 Minutes ---
+        private const val CSV_SAVE_INTERVAL_MS = 1 * 60 * 1000L
 
-        // --- HF Protocol Constants ---
+        // --- Protocol Constants ---
         private const val HF_HEADER_1 = 0xAA.toByte()
         private const val HF_HEADER_2 = 0x55.toByte()
         private const val HF_MSG_ID_IMU = 0x2C.toByte()
@@ -97,7 +86,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         private const val HF_PACKET_LEN_IMU = 47
         private const val HF_PACKET_LEN_RPY = 23
 
-        // --- Yahboom Protocol Constants ---
         private const val YAHBOOM_HEADER = 0x55.toByte()
         private const val YAHBOOM_PACKET_LEN = 11
         private const val YAHBOOM_TYPE_ACC = 0x51.toByte()
@@ -153,6 +141,9 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         }
     }
 
+    // --- NEW: Add ViewModel Reference ---
+    private lateinit var csvUploadViewModel: CsvUploadViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -175,57 +166,32 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
         initializeConnectionCheckRunnable()
 
-        // --- NEW: Start the CSV Saving Timer ---
-        startCsvSaveTimer()
+        // Initial start of CSV logic for the default selection
+        startCsvRecordingSession()
 
         updateStatus("Ready. Select IMU type.")
+
+        // --- NEW: Initialize the ViewModel ---
+        csvUploadViewModel = ViewModelProvider(this)[CsvUploadViewModel::class.java]
     }
 
-    // --- NEW: 5 Minute Timer for CSV Saving ---
-    private fun startCsvSaveTimer() {
-        // lifecycleScope launches a coroutine that dies when the Activity is destroyed
-        lifecycleScope.launch(Dispatchers.IO) {
-// 2. Create a snapshot of the buffer and clear the original
-            // We lock the buffer briefly to swap the data
-            val dataToSave: List<ImuRecord> = synchronized(imuDataBuffer) {
-                if (imuDataBuffer.isEmpty()) {
-                    emptyList() // Return an empty list if there is no data
-                } else {
-                    val copy = ArrayList(imuDataBuffer)
-                    imuDataBuffer.clear()
-                    copy // Return the copy containing the data
-                }
-            }
-
-            // 3. Save to file if we have data
-            // (The rest of your code remains the same)
-            if (dataToSave.isNotEmpty()) {
-                saveBufferToCsvFile(dataToSave)
-            } else {
-                Log.d(TAG, "CSV Timer: No data to save.")
-            }
-        }
-    }
-
-    // --- NEW: Function to write data to storage ---
+    // --- NEW: Save to Temp Folder (cacheDir) ---
     private suspend fun saveBufferToCsvFile(data: List<ImuRecord>) {
         withContext(Dispatchers.IO) {
             try {
-                // Create a unique filename based on current time
                 val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                val fileName = "imu_data_$timeStamp.csv"
+                val fileName = "imu_${currentImuType}_$timeStamp.csv"
 
-                // Get app-specific storage directory (No permissions needed for this)
-                // Path: /Android/data/com.example.myfirstkotlinapp/files/
-                val dir = getExternalFilesDir(null)
+                // --- CHANGED: Uses cacheDir (App Installation Temp Folder) ---
+                // If you want it accessible via PC easily, use: externalCacheDir
+                val dir = cacheDir
+                if (!dir.exists()) dir.mkdirs()
+
                 val file = File(dir, fileName)
 
                 val writer = FileWriter(file)
-
-                // Write Header
                 writer.append("Timestamp,AccX,AccY,AccZ,GyroX,GyroY,GyroZ,MagX,MagY,MagZ,Roll,Pitch,Yaw\n")
 
-                // Write Data
                 for (record in data) {
                     writer.append(record.toCsvString()).append("\n")
                 }
@@ -235,9 +201,8 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
                 Log.i(TAG, "Saved CSV: ${file.absolutePath} (${data.size} records)")
 
-                // Show a toast on the UI thread
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "Saved CSV: $fileName", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(applicationContext, "Saved 5min Data to Temp: $fileName", Toast.LENGTH_LONG).show()
                 }
 
             } catch (e: IOException) {
@@ -260,9 +225,9 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
                 val selectedType = ImuType.entries[position]
                 if (currentImuType != selectedType) {
                     currentImuType = selectedType
-                    // Reset buffers and data on switch
+
+                    // Reset connection buffers
                     receiveBuffer.reset()
-                    synchronized(imuDataBuffer) { imuDataBuffer.clear() } // Clear CSV buffer too
                     lastImuData = null
                     lastRpyData = null
                     yhAcc = FloatArray(3)
@@ -270,7 +235,11 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
                     yhAngle = FloatArray(3)
 
                     updateUI(null, null)
-                    Log.i(TAG, "Switched IMU Type to: $currentImuType")
+
+                    // --- NEW: Reset the CSV Timer immediately upon selection ---
+                    startCsvRecordingSession()
+
+                    Log.i(TAG, "Switched IMU Type to: $currentImuType. CSV Timer Reset.")
                 }
             }
 
@@ -287,19 +256,16 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         }
     }
 
-    // =========================================================================
-    // PROTOCOL 1: HF IMU
-    // =========================================================================
+    // ... (Rest of your Protocol Parsing logic remains exactly the same) ...
+
     private fun processHFBuffer() {
         val buffer = receiveBuffer.toByteArray()
         var searchIndex = 0
-
         while (searchIndex < buffer.size - 1) {
             if (buffer[searchIndex] == HF_HEADER_1 && buffer[searchIndex + 1] == HF_HEADER_2) {
                 if (searchIndex + 2 < buffer.size) {
                     val msgId = buffer[searchIndex + 2]
                     val packetLen = if (msgId == HF_MSG_ID_IMU) HF_PACKET_LEN_IMU else if (msgId == HF_MSG_ID_RPY) HF_PACKET_LEN_RPY else 0
-
                     if (packetLen > 0) {
                         if (searchIndex + packetLen <= buffer.size) {
                             val packetBytes = buffer.copyOfRange(searchIndex, searchIndex + packetLen)
@@ -341,18 +307,13 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         }
     }
 
-    // =========================================================================
-    // PROTOCOL 2: YAHBOOM IMU
-    // =========================================================================
     private fun processYahboomBuffer() {
         val buffer = receiveBuffer.toByteArray()
         var searchIndex = 0
-
         while (searchIndex < buffer.size) {
             if (buffer[searchIndex] == YAHBOOM_HEADER) {
                 if (searchIndex + YAHBOOM_PACKET_LEN <= buffer.size) {
                     val packetBytes = buffer.copyOfRange(searchIndex, searchIndex + YAHBOOM_PACKET_LEN)
-
                     if (verifyYahboomChecksum(packetBytes)) {
                         parseYahboomPacket(packetBytes)
                         searchIndex += YAHBOOM_PACKET_LEN
@@ -382,7 +343,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             val high = packet[offset+1].toInt() and 0xFF
             return (high shl 8 or low).toShort()
         }
-
         try {
             var uiUpdateNeeded = false
             when (type) {
@@ -395,7 +355,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
                     yhGyro[0] = getShort(2) / 32768.0f * 2000.0f
                     yhGyro[1] = getShort(4) / 32768.0f * 2000.0f
                     yhGyro[2] = getShort(6) / 32768.0f * 2000.0f
-
                     lastImuData = ImuData(yhAcc[0], yhAcc[1], yhAcc[2],
                         yhGyro[0], yhGyro[1], yhGyro[2],
                         0f, 0f, 0f)
@@ -405,21 +364,16 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
                     yhAngle[0] = getShort(2) / 32768.0f * 180.0f
                     yhAngle[1] = getShort(4) / 32768.0f * 180.0f
                     yhAngle[2] = getShort(6) / 32768.0f * 180.0f
-
                     lastRpyData = RpyData(yhAngle[0], yhAngle[1], yhAngle[2])
                     uiUpdateNeeded = true
                 }
             }
             if (uiUpdateNeeded) updateUI(lastImuData, lastRpyData)
-
         } catch (e: Exception) {
             Log.e(TAG, "Yahboom Parse Error: ${e.message}")
         }
     }
 
-    // =========================================================================
-    // UTILITIES
-    // =========================================================================
     private fun cleanBuffer(processCount: Int, buffer: ByteArray) {
         if (processCount > 0) {
             val remaining = buffer.copyOfRange(processCount, buffer.size)
@@ -429,7 +383,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
     }
 
     private fun updateUI(imu: ImuData?, rpy: RpyData?) {
-        // --- NEW: Add to buffer for CSV Saving ---
+        // Collect data for CSV
         if (imu != null && rpy != null) {
             val record = ImuRecord(
                 timestamp = System.currentTimeMillis(),
@@ -440,7 +394,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             )
             imuDataBuffer.add(record)
         }
-        // ------------------------------------------
 
         val accStr = if (imu != null) "x=${"%.2f".format(imu.accX)}, y=${"%.2f".format(imu.accY)}, z=${"%.2f".format(imu.accZ)}" else "..."
         val gyroStr = if (imu != null) "x=${"%.2f".format(imu.gyroX)}, y=${"%.2f".format(imu.gyroY)}, z=${"%.2f".format(imu.gyroZ)}" else "..."
@@ -463,7 +416,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         }
     }
 
-    // --- Standard Connection Logic ---
     override fun onRunError(e: Exception) {
         Log.e(TAG, "Serial Error: ${e.message}")
         runOnUiThread { disconnect() }
@@ -543,7 +495,6 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             serialPort?.close()
         } catch (e: IOException) {
             Log.e(TAG, "Error opening port: ${e.message}")
-            // ignore
         } finally {
             serialIoManager = null
             serialPort = null
@@ -561,6 +512,50 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         } else {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
+    }
+
+    // --- MODIFIED: The Timer Logic ---
+    private fun startCsvRecordingSession() {
+        csvJob?.cancel()
+
+        synchronized(imuDataBuffer) {
+            imuDataBuffer.clear()
+        }
+
+        Log.i(TAG, "CSV Logging Started: Waiting $CSV_SAVE_INTERVAL_MS ms")
+
+        csvJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                // 1. Wait for 5 minutes
+                delay(CSV_SAVE_INTERVAL_MS)
+
+                // 2. Extract data safely
+                val dataToProcess: List<ImuRecord> = synchronized(imuDataBuffer) {
+                    if (imuDataBuffer.isEmpty()) {
+                        emptyList()
+                    } else {
+                        val copy = ArrayList(imuDataBuffer)
+                        imuDataBuffer.clear()
+                        copy
+                    }
+                }
+
+                if (dataToProcess.isNotEmpty()) {
+                    // Action A: Save to Local Storage (Keep your backup)
+                    saveBufferToCsvFile(dataToProcess)
+
+                    // Action B: Upload to AWS S3 (NEW)
+                    Log.i(TAG, "Triggering S3 Upload for ${dataToProcess.size} records...")
+                    csvUploadViewModel.uploadImuData(dataToProcess)
+
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(applicationContext, "Saving Local & Uploading to S3...", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Log.d(TAG, "Timer: No data to save/upload.")
+                }
+            }
         }
     }
 }

@@ -4,6 +4,8 @@
 
     <!-- 1. Declare that the app uses USB Host features -->
     <uses-feature android:name="android.hardware.usb.host" />
+    <!-- 2. Add internet permission to upload s3 -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
