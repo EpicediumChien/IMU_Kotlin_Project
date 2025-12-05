@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">MyFristKotlinApp</string>
     <string name="statusText">Status: %1$s</string>
+    <string name="select_imu">Select IMU:</string>
+    <string name="status_disconnected">Status: Disconnected</string>
+    <string name="waiting_for_data">Waiting for data...</string>
 </resources>
