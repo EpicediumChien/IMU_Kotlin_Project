@@ -26,8 +26,6 @@ import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -80,6 +78,9 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
     companion object {
         private const val VENDOR_ID = 4292
         private const val PRODUCT_ID = 60000
+
+        // BAUD_RATE = 115200 ~= 349Hz
+        // BAUD_RATE = 9600 ~= 29Hz
         private const val BAUD_RATE = 9600 // Kept at 9600
         private const val TAG = "IMU_USB"
         private const val ACTION_USB_PERMISSION = "com.example.myfirstkotlinapp.USB_PERMISSION"
@@ -249,14 +250,14 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            ImuType.values()
+            ImuType.entries.toTypedArray()
         )
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         imuTypeSpinner.adapter = adapter
 
         imuTypeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
-                val selectedType = ImuType.values()[position]
+                val selectedType = ImuType.entries[position]
                 if (currentImuType != selectedType) {
                     currentImuType = selectedType
                     // Reset buffers and data on switch
@@ -531,6 +532,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             Executors.newSingleThreadExecutor().submit(serialIoManager)
             updateStatus("Connected! (${currentImuType.name})")
         } catch (e: IOException) {
+            Log.e(TAG, "Error opening port: ${e.message}")
             disconnect()
         }
     }
@@ -540,6 +542,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             serialIoManager?.stop()
             serialPort?.close()
         } catch (e: IOException) {
+            Log.e(TAG, "Error opening port: ${e.message}")
             // ignore
         } finally {
             serialIoManager = null
