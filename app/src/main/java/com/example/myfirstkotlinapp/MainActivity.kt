@@ -372,7 +372,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
                     lastImuData = ImuData(yhAcc[0], yhAcc[1], yhAcc[2],
                         yhGyro[0], yhGyro[1], yhGyro[2],
-                        yhMag[0], yhMag[1], yhMag[2])
+                        0f, 0f, 0f) // Force Mag to 0
                     uiUpdateNeeded = true
                 }
                 YAHBOOM_TYPE_ANGLE -> {
