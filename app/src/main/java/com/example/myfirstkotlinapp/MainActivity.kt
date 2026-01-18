@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
         private const val YAHBOOM_TYPE_ACC = 0x51.toByte()
         private const val YAHBOOM_TYPE_GYRO = 0x52.toByte()
         private const val YAHBOOM_TYPE_ANGLE = 0x53.toByte()
+        private const val YAHBOOM_TYPE_MAG = 0x54.toByte() // Add this
     }
 
     private lateinit var usbManager: UsbManager
@@ -106,6 +107,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
     private var yhAcc = FloatArray(3)
     private var yhGyro = FloatArray(3)
     private var yhAngle = FloatArray(3)
+    private var yhMag = FloatArray(3) // Add this to your class properties
 
     private lateinit var statusTextView: TextView
     private lateinit var dataTextView: TextView
@@ -291,7 +293,8 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
             if (msgId == HF_MSG_ID_IMU) {
                 val gx = bb.getFloat(3); val gy = bb.getFloat(7); val gz = bb.getFloat(11)
                 val ax = bb.getFloat(15); val ay = bb.getFloat(19); val az = bb.getFloat(23)
-                val mx = bb.getFloat(27); val my = bb.getFloat(31); val mz = bb.getFloat(35)
+                //val mx = bb.getFloat(27); val my = bb.getFloat(31); val mz = bb.getFloat(35)
+                val mx = 0f; val my = 0f; val mz = 0f;
                 lastImuData = ImuData(ax, ay, az, gx, gy, gz, mx, my, mz)
                 isNewData = true
             } else if (msgId == HF_MSG_ID_RPY) {
@@ -357,7 +360,19 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
                     yhGyro[2] = getShort(6) / 32768.0f * 2000.0f
                     lastImuData = ImuData(yhAcc[0], yhAcc[1], yhAcc[2],
                         yhGyro[0], yhGyro[1], yhGyro[2],
-                        0f, 0f, 0f)
+                        yhMag[0], yhMag[1], yhMag[2])
+                    uiUpdateNeeded = true
+                }
+                // --- NEW CODE START ---
+                YAHBOOM_TYPE_MAG -> {
+                    // Standard IMU Mag data handling (Units: uT usually)
+                    yhMag[0] = getShort(2).toFloat() // Often requires specific scaling depending on sensor
+                    yhMag[1] = getShort(4).toFloat()
+                    yhMag[2] = getShort(6).toFloat()
+
+                    lastImuData = ImuData(yhAcc[0], yhAcc[1], yhAcc[2],
+                        yhGyro[0], yhGyro[1], yhGyro[2],
+                        yhMag[0], yhMag[1], yhMag[2])
                     uiUpdateNeeded = true
                 }
                 YAHBOOM_TYPE_ANGLE -> {
@@ -397,7 +412,7 @@ class MainActivity : AppCompatActivity(), SerialInputOutputManager.Listener {
 
         val accStr = if (imu != null) "x=${"%.2f".format(imu.accX)}, y=${"%.2f".format(imu.accY)}, z=${"%.2f".format(imu.accZ)}" else "..."
         val gyroStr = if (imu != null) "x=${"%.2f".format(imu.gyroX)}, y=${"%.2f".format(imu.gyroY)}, z=${"%.2f".format(imu.gyroZ)}" else "..."
-        val magStr = "N/A"
+        val magStr = if (imu != null) "x=${"%.2f".format(imu.magX)}, y=${"%.2f".format(imu.magY)}, z=${"%.2f".format(imu.magZ)}" else "..."
         val rpyStr = if (rpy != null) "R=${"%.2f".format(rpy.roll)}, P=${"%.2f".format(rpy.pitch)}, Y=${"%.2f".format(rpy.yaw)}" else "..."
 
         val outputText = """

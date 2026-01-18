@@ -60,6 +60,7 @@ dependencies {
     implementation("aws.smithy.kotlin:aws-credentials:1.5.18") // <-- Updated group and example version
 
     testImplementation(libs.junit)
+    testImplementation(libs.junit.jupiter)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
